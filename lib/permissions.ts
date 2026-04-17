@@ -72,5 +72,5 @@ export function canAssignApprovers(user: UserLike) {
 }
 
 export function canViewLeaveApprovals(user: UserLike) {
-  return canViewEMSAdminDashboard(user);
+  return isAdmin(user) || isManager(user) || isTeamLead(user);
 }

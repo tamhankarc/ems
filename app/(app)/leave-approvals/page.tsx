@@ -2,7 +2,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { requireUser } from "@/lib/auth";
 import { canViewEMSAdminDashboard } from "@/lib/permissions";
-import { getLeaveApprovalsForUser } from "@/lib/ems-queries";
+import { getLeaveApprovalsForUser, getGlobalApproverAssignmentIds } from "@/lib/ems-queries";
 import { formatDateInIst } from "@/lib/ist";
 import { reviewLeaveRequestAction } from "@/lib/actions/leave-actions";
 import { paginateItems, parsePageParam } from "@/lib/pagination";
@@ -13,8 +13,9 @@ export default async function LeaveApprovalsPage({
   searchParams?: Promise<{ page?: string }>;
 }) {
   const user = await requireUser();
-  const elevated = canViewEMSAdminDashboard(user);
-  const rows = await getLeaveApprovalsForUser(user.id, elevated);
+  const selectedApproverIds = await getGlobalApproverAssignmentIds();
+  const elevated = canViewEMSAdminDashboard(user) && selectedApproverIds.includes(user.id);
+  const rows = await getLeaveApprovalsForUser(user.id, !elevated);
   const params = (await searchParams) ?? {};
   const pagination = paginateItems(rows, parsePageParam(params.page), 10);
 
@@ -23,8 +24,8 @@ export default async function LeaveApprovalsPage({
       <PageHeader
         title="Leave Approvals"
         description={
-          elevated
-            ? "Admin, HR, and PM can view all leave requests. Only designated approvers can take approval actions."
+          !elevated
+            ? "Admin, HR, Managers and Team Leads can view all leave requests. Only designated approvers can take approval actions."
             : "Review leave requests assigned to you as a designated approver."
         }
       />
@@ -46,7 +47,7 @@ export default async function LeaveApprovalsPage({
           </thead>
           <tbody className="divide-y divide-slate-100">
             {pagination.items.map((row) => {
-              const canAct = !elevated;
+              const canAct = elevated;
               return (
                 <tr key={row.id}>
                   <td className="table-cell font-medium text-slate-900">{row.user.fullName}</td>
