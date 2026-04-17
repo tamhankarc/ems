@@ -32,6 +32,7 @@ export function isReportViewer(user: UserLike) { return getUserType(user) === "R
 export function isAccounts(user: UserLike) { return getUserType(user) === "ACCOUNTS"; }
 export function isHR(user: UserLike) { return getUserType(user) === "HR"; }
 export function isProjectManager(user: UserLike) { return isManager(user) && getFunctionalRole(user) === "PROJECT_MANAGER"; }
+export function isAdminProjectManager(user: UserLike) { return isAdmin(user) && getFunctionalRole(user) === "PROJECT_MANAGER"; }
 export function isRoleScopedManager(user: UserLike) { return isManager(user) && getFunctionalRole(user) !== "PROJECT_MANAGER"; }
 
 export function canComprehensivelyModerateProject(user: UserLike) { return isAdmin(user) || isManager(user) || isHR(user); }
@@ -64,7 +65,7 @@ export function canMarkAttendance(user: UserLike) {
 }
 
 export function canAccessLeaveRequests(user: UserLike) {
-  return canMarkAttendance(user);
+  return canMarkAttendance(user) || isManager(user) || isHR(user) || isAdminProjectManager(user);
 }
 
 export function canAssignApprovers(user: UserLike) {
