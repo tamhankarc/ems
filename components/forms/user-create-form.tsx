@@ -12,6 +12,7 @@ const operationalFunctionalRoles = [
   "LOCALIZATION",
   "DEVOPS",
   "PROJECT_MANAGER",
+  "DIRECTOR",
   "OTHER",
 ] as const;
 

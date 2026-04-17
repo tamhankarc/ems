@@ -24,6 +24,7 @@ enum FunctionalRoleCode {
   LOCALIZATION
   DEVOPS
   PROJECT_MANAGER
+  DIRECTOR
   OTHER
   BILLING
 }

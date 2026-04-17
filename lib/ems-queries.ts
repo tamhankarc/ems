@@ -221,6 +221,70 @@ export async function getAttendanceCalendarData(userId: string, monthKey: string
   };
 }
 
+export async function getAllowedLeaveRequestApproversForUser(userId: string) {
+  const requester = await db.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      userType: true,
+      functionalRole: true,
+    },
+  });
+
+  if (!requester) return [];
+
+  if (requester.userType === "EMPLOYEE") {
+    const assignments = await db.leaveApproverAssignment.findMany({
+      where: { employeeId: userId },
+      include: {
+        approver: {
+          select: { id: true, fullName: true, userType: true, functionalRole: true },
+        },
+      },
+      orderBy: [{ approver: { fullName: "asc" } }],
+    });
+
+    return assignments
+      .map((row) => row.approver)
+      .filter((approver) =>
+        approver.userType === "TEAM_LEAD" ||
+        (approver.userType === "MANAGER"),
+      );
+  }
+
+  if (requester.userType === "TEAM_LEAD" || (requester.userType === "MANAGER" && requester.functionalRole !== "PROJECT_MANAGER")) {
+    return db.user.findMany({
+      where: {
+        isActive: true,
+        userType: "MANAGER",
+        functionalRole: "PROJECT_MANAGER",
+      },
+      select: { id: true, fullName: true, userType: true, functionalRole: true },
+      orderBy: [{ fullName: "asc" }],
+    });
+  }
+
+  if (requester.userType === "HR" || requester.functionalRole === "PROJECT_MANAGER") {
+    return db.user.findMany({
+      where: {
+        isActive: true,
+        userType: "ADMIN",
+        functionalRole: "DIRECTOR",
+      },
+      select: { id: true, fullName: true, userType: true, functionalRole: true },
+      orderBy: [{ fullName: "asc" }],
+    });
+  }
+
+  return [];
+}
+
+export async function isValidLeaveRequestApproverForUser(userId: string, approverId: string) {
+  if (!approverId) return false;
+  const approvers = await getAllowedLeaveRequestApproversForUser(userId);
+  return approvers.some((approver) => approver.id === approverId);
+}
+
 export async function getLeaveRequestsForUser(userId: string, todayDateKey: string) {
   const { startUtc } = getDayBoundsUtcFromIstDateKey(todayDateKey);
 
@@ -258,29 +322,17 @@ export async function getLeaveRequestsForUser(userId: string, todayDateKey: stri
     orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
   });
 
-  const approvers = await db.leaveApproverAssignment.findMany({
-    where: { employeeId: userId },
-    include: {
-      approver: {
-        select: { id: true, fullName: true, userType: true, functionalRole: true },
-      },
-    },
-    orderBy: [{ approver: { fullName: "asc" } }],
-  });
+  const approvers = await getAllowedLeaveRequestApproversForUser(userId);
 
-  return { current, past, approvers: approvers.map((row) => row.approver) };
+  return { current, past, approvers };
 }
 
-export async function getLeaveApprovalsForUser(viewerId: string, elevated: boolean) {
-  const where = elevated
-    ? {}
-    : {
-        user: {
-          leaveApproverAssignments: {
-            some: { approverId: viewerId },
-          },
-        },
-      };
+export async function getLeaveApprovalsForUser(viewerId: string, restrictToAssigned: boolean) {
+  const where = restrictToAssigned
+    ? {
+        OR: [{ approverId: viewerId }, { user: { leaveApproverAssignments: { some: { approverId: viewerId } } } }],
+      }
+    : {};
 
   return db.leaveRequest.findMany({
     where,

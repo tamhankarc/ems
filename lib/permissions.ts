@@ -34,6 +34,10 @@ export function isHR(user: UserLike) { return getUserType(user) === "HR"; }
 export function isProjectManager(user: UserLike) { return isManager(user) && getFunctionalRole(user) === "PROJECT_MANAGER"; }
 export function isAdminProjectManager(user: UserLike) { return isAdmin(user) && getFunctionalRole(user) === "PROJECT_MANAGER"; }
 export function isRoleScopedManager(user: UserLike) { return isManager(user) && getFunctionalRole(user) !== "PROJECT_MANAGER"; }
+export function isAdminDirector(user: UserLike) { return isAdmin(user) && getFunctionalRole(user) === "DIRECTOR"; }
+export function isPmLike(user: UserLike) {
+  return (isManager(user) || isAdmin(user)) && getFunctionalRole(user) === "PROJECT_MANAGER";
+}
 
 export function canComprehensivelyModerateProject(user: UserLike) { return isAdmin(user) || isManager(user) || isHR(user); }
 export function canFullyModerateProject(user: UserLike) { return canComprehensivelyModerateProject(user); }
@@ -65,7 +69,7 @@ export function canMarkAttendance(user: UserLike) {
 }
 
 export function canAccessLeaveRequests(user: UserLike) {
-  return canMarkAttendance(user) || isManager(user) || isHR(user) || isAdminProjectManager(user);
+  return canMarkAttendance(user) || isPmLike(user) || isHR(user);
 }
 
 export function canAssignApprovers(user: UserLike) {
@@ -73,5 +77,5 @@ export function canAssignApprovers(user: UserLike) {
 }
 
 export function canViewLeaveApprovals(user: UserLike) {
-  return isAdmin(user) || isManager(user) || isTeamLead(user);
+  return isAdmin(user) || isManager(user) || isTeamLead(user) || isHR(user);
 }

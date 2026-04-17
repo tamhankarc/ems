@@ -15,6 +15,7 @@ export type CurrentUser = {
     | "LOCALIZATION"
     | "DEVOPS"
     | "PROJECT_MANAGER"
+    | "DIRECTOR"
     | "BILLING"
     | "OTHER"
     | "UNASSIGNED"
