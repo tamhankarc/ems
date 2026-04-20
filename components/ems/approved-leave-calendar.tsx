@@ -153,7 +153,7 @@ export function ApprovedLeaveCalendar({
                 className={`flex min-h-16 flex-col items-start justify-between rounded-2xl border px-3 py-2 text-left transition ${baseClass}`}
               >
                 <span className="text-sm font-semibold text-slate-800">{cell.day}</span>
-                <span className="flex h-5 items-center gap-1 text-[11px] font-medium text-violet-700">
+                <span className="flex h-5 items-center gap-1 text-[11px] font-medium text-orange-700">
                   {hasLeave ? <CalendarDays className="h-3.5 w-3.5" /> : null}
                   {hasLeave ? "Leave" : ""}
                 </span>

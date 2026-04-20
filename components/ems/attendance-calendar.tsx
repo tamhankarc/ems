@@ -62,7 +62,7 @@ function DayCell({ dateKey, day, todayKey, presentDays, leaveDays, weekendOrHoli
     if (dateKey === todayKey) {
       className = "border-sky-200 bg-sky-100";
     } else if (leaveDays.has(dateKey)) {
-      className = "border-violet-200 bg-violet-100";
+      className = "border-orange-200 bg-orange-100";
     } else if (weekendOrHolidayDays.has(dateKey)) {
       className = "border-purple-200 bg-purple-100";
     } else if (dateKey > todayKey) {
@@ -162,7 +162,7 @@ export function AttendanceCalendar({
         <div>
           <h2 className="section-title">Attendance calendar</h2>
           <p className="section-subtitle">
-            Green: present, Red: absent, Violet: approved leave, Purple: weekend or official holiday, Blue: today, White: future. Weekend or holiday dates change to approved leave only for unpaid sandwich leave cases.
+            Green: present, Red: absent, Orange: approved leave, Purple: weekend or official holiday, Blue: today, White: future. Weekend or holiday dates change to approved leave only for unpaid sandwich leave cases.
           </p>
         </div>
 
