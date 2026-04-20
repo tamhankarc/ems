@@ -73,6 +73,40 @@ export async function getPendingLeaveCount() {
   return db.leaveRequest.count({ where: { status: "PENDING" } });
 }
 
+export async function getPendingLeaveApprovalInfoForUser(viewer: {
+  id: string;
+  userType: string;
+  functionalRole?: string | null;
+}) {
+  const globallyAssignedApproverIds = await getGlobalApproverAssignmentIds();
+  const isAdminProjectManagerApprover =
+    viewer.userType === "ADMIN" &&
+    viewer.functionalRole === "PROJECT_MANAGER" &&
+    globallyAssignedApproverIds.includes(viewer.id);
+
+  if (isAdminProjectManagerApprover) {
+    const totalPendingCount = await getPendingLeaveCount();
+    return {
+      count: totalPendingCount,
+      mode: "total" as const,
+      canActOnAnyPendingRequest: true,
+    };
+  }
+
+  const ownPendingCount = await db.leaveRequest.count({
+    where: {
+      status: "PENDING",
+      approverId: viewer.id,
+    },
+  });
+
+  return {
+    count: ownPendingCount,
+    mode: "assigned" as const,
+    canActOnAnyPendingRequest: false,
+  };
+}
+
 export async function getApproverOptions() {
   return db.user.findMany({
     where: {
@@ -324,52 +358,148 @@ export async function getAllowedLeaveRequestApproversForUser(userId: string) {
       id: true,
       userType: true,
       functionalRole: true,
+      isActive: true,
     },
   });
 
   if (!requester) return [];
 
-  if (requester.userType === "EMPLOYEE") {
-    const assignments = await db.leaveApproverAssignment.findMany({
-      where: { employeeId: userId },
+  const [globallyAssignedApprovers, employeeAssignedApproverRows] = await Promise.all([
+    db.user.findMany({
+      where: {
+        isActive: true,
+        approverForEmployees: {
+          some: {},
+        },
+      },
+      select: {
+        id: true,
+        fullName: true,
+        userType: true,
+        functionalRole: true,
+      },
+      orderBy: [{ fullName: "asc" }],
+    }),
+    db.leaveApproverAssignment.findMany({
+      where: {
+        employeeId: userId,
+      },
       include: {
         approver: {
-          select: { id: true, fullName: true, userType: true, functionalRole: true },
+          select: {
+            id: true,
+            fullName: true,
+            userType: true,
+            functionalRole: true,
+            isActive: true,
+          },
         },
       },
       orderBy: [{ approver: { fullName: "asc" } }],
-    });
+    }),
+  ]);
 
-    return assignments
-      .map((row) => row.approver)
-      .filter((approver) => approver.userType === "TEAM_LEAD" || approver.userType === "MANAGER");
-  }
+  const assignedApprovers = employeeAssignedApproverRows
+    .map((row) => row.approver)
+    .filter((approver) => approver?.isActive);
 
-  if (requester.userType === "TEAM_LEAD" || (requester.userType === "MANAGER" && requester.functionalRole !== "PROJECT_MANAGER")) {
-    return db.user.findMany({
-      where: {
-        isActive: true,
-        userType: "MANAGER",
-        functionalRole: "PROJECT_MANAGER",
-      },
-      select: { id: true, fullName: true, userType: true, functionalRole: true },
-      orderBy: [{ fullName: "asc" }],
-    });
-  }
+  const globalApprovers = globallyAssignedApprovers.filter((approver) => approver.id !== userId);
 
-  if (requester.userType === "HR" || requester.functionalRole === "PROJECT_MANAGER") {
-    return db.user.findMany({
-      where: {
-        isActive: true,
-        userType: "ADMIN",
-        functionalRole: "DIRECTOR",
-      },
-      select: { id: true, fullName: true, userType: true, functionalRole: true },
-      orderBy: [{ fullName: "asc" }],
+  const mergedMap = new Map<
+    string,
+    {
+      id: string;
+      fullName: string;
+      userType: string;
+      functionalRole: string | null;
+    }
+  >();
+
+  for (const approver of [...assignedApprovers, ...globalApprovers]) {
+    if (!approver) continue;
+    mergedMap.set(approver.id, {
+      id: approver.id,
+      fullName: approver.fullName,
+      userType: approver.userType,
+      functionalRole: approver.functionalRole ?? null,
     });
   }
 
-  return [];
+  const allCandidates = [...mergedMap.values()];
+
+  const isAdminProjectManager = (user: {
+    userType: string;
+    functionalRole: string | null;
+  }) => user.userType === "ADMIN" && user.functionalRole === "PROJECT_MANAGER";
+
+  const isManagerProjectManager = (user: {
+    userType: string;
+    functionalRole: string | null;
+  }) => user.userType === "MANAGER" && user.functionalRole === "PROJECT_MANAGER";
+
+  const isAdminDirector = (user: {
+    userType: string;
+    functionalRole: string | null;
+  }) => user.userType === "ADMIN" && user.functionalRole === "DIRECTOR";
+
+  const isRoleScopedManager = (user: {
+    userType: string;
+    functionalRole: string | null;
+  }) => user.userType === "MANAGER" && user.functionalRole !== "PROJECT_MANAGER";
+
+  const isAssignedToEmployee = (approverId: string) =>
+    assignedApprovers.some((approver) => approver.id === approverId);
+
+  const results = allCandidates.filter((candidate) => {
+    if (!candidate.id || candidate.id === requester.id) return false;
+
+    if (
+      requester.userType === "HR" ||
+      isAdminProjectManager(requester) ||
+      isManagerProjectManager(requester)
+    ) {
+      return isAdminDirector(candidate);
+    }
+
+    if (
+      requester.userType === "EMPLOYEE" ||
+      requester.userType === "TEAM_LEAD" ||
+      isRoleScopedManager(requester)
+    ) {
+      if (isAdminProjectManager(candidate)) {
+        return true;
+      }
+    }
+
+    if (requester.userType === "EMPLOYEE") {
+      const sameRoleAssignedRsm =
+        isAssignedToEmployee(candidate.id) &&
+        isRoleScopedManager(candidate) &&
+        (candidate.functionalRole ?? null) === (requester.functionalRole ?? null);
+
+      const sameRoleAssignedTl =
+        isAssignedToEmployee(candidate.id) &&
+        candidate.userType === "TEAM_LEAD" &&
+        (candidate.functionalRole ?? null) === (requester.functionalRole ?? null);
+
+      if (sameRoleAssignedRsm || sameRoleAssignedTl) {
+        return true;
+      }
+    }
+
+    if (
+      (requester.userType === "EMPLOYEE" || requester.userType === "TEAM_LEAD") &&
+      requester.functionalRole === "DEVELOPER"
+    ) {
+      if (isManagerProjectManager(candidate)) {
+        return true;
+      }
+    }
+
+    return false;
+  });
+
+  return results.sort((a, b) => a.fullName.localeCompare(b.fullName));
 }
 
 export async function isValidLeaveRequestApproverForUser(userId: string, approverId: string) {

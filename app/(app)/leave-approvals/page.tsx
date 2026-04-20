@@ -2,7 +2,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { requireUser } from "@/lib/auth";
 import { redirect } from "next/navigation";
-import { canViewEMSAdminDashboard, isAdmin, isHR } from "@/lib/permissions";
+import { canViewEMSAdminDashboard, isAdmin, isAdminProjectManager, isHR } from "@/lib/permissions";
 import { getLeaveApprovalsForUser, getGlobalApproverAssignmentIds } from "@/lib/ems-queries";
 import { formatDateInIst } from "@/lib/ist";
 import { paginateItems, parsePageParam } from "@/lib/pagination";
@@ -16,6 +16,7 @@ export default async function LeaveApprovalsPage({
   const user = await requireUser();
   const selectedApproverIds = await getGlobalApproverAssignmentIds();
   const isDesignatedApprover = selectedApproverIds.includes(user.id);
+  const isAdminPmApprover = isAdminProjectManager(user) && isDesignatedApprover;
   const canAccessPage = isAdmin(user) || isHR(user) || isDesignatedApprover;
 
   if (!canAccessPage) {
@@ -35,7 +36,7 @@ export default async function LeaveApprovalsPage({
         description={
           canAct
             ? "Review leave requests assigned to you as a designated approver."
-            : "Admins and HR can view leave requests. Only designated approvers can take approval actions."
+            : "Admins and HR can view leave requests. Only the selected approver and Admin users with functional role Project Manager who are included in the approver list can take approval actions."
         }
       />
 
@@ -56,7 +57,7 @@ export default async function LeaveApprovalsPage({
           </thead>
           <tbody className="divide-y divide-slate-100">
             {pagination.items.map((row) => {
-              const showActions = canAct && row.status === "PENDING";
+              const showActions = row.status === "PENDING" && (row.approverId === user.id || isAdminPmApprover);
 
               return (
                 <tr key={row.id}>

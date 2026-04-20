@@ -12,7 +12,7 @@ import {
   getEmployeeDashboardSnapshot,
   getGlobalApproverAssignmentIds,
   getApproverOptions,
-  getPendingLeaveCount,
+  getPendingLeaveApprovalInfoForUser,
 } from "@/lib/ems-queries";
 import { AttendanceActionsCard } from "@/components/ems/attendance-actions-card";
 import { AttendanceCalendar } from "@/components/ems/attendance-calendar";
@@ -68,9 +68,9 @@ export default async function DashboardPage({
       : todayKey.slice(0, 7);
 
   if (canViewEMSAdminDashboard(user)) {
-    const [dashboardData, pendingCount, approvers, selectedApproverIds, leaveCalendarData] = await Promise.all([
+    const [dashboardData, pendingApprovalInfo, approvers, selectedApproverIds, leaveCalendarData] = await Promise.all([
       getAdminDashboardData(attendanceDate),
-      getPendingLeaveCount(),
+      getPendingLeaveApprovalInfoForUser(user),
       getApproverOptions(),
       getGlobalApproverAssignmentIds(),
       getApprovedLeaveMonthCalendar(leaveMonth),
@@ -82,24 +82,17 @@ export default async function DashboardPage({
       10,
     );
     const canOpenLeaveApprovals = isAdmin(user) || isHR(user) || selectedApproverIds.includes(user.id);
+    const pendingCount = pendingApprovalInfo.count;
+    const pendingLabel =
+      pendingApprovalInfo.mode === "total"
+        ? `There ${pendingCount === 1 ? "is" : "are"} ${pendingCount} pending leave ${pendingCount === 1 ? "request" : "requests"} awaiting approver action.`
+        : `There ${pendingCount === 1 ? "is" : "are"} ${pendingCount} pending leave ${pendingCount === 1 ? "request" : "requests"} assigned to you as approver.`;
 
     return (
       <div className="space-y-6">
         <PageHeader
           title="Dashboard"
           description="Attendance, approved leaves, pending approvals, and approver assignment overview."
-        />
-
-        <ApprovedLeaveCalendar
-          title="Employees on approved leave"
-          subtitle="Select any date to see the employees on approved leave for that day."
-          data={leaveCalendarData}
-          basePath="/dashboard"
-          extraSearchParams={{
-            attendanceDate,
-            month: params.month,
-            attendancePage: params.attendancePage,
-          }}
         />
 
         {pendingCount > 0 && canOpenLeaveApprovals ? (
@@ -112,9 +105,7 @@ export default async function DashboardPage({
                 <div>
                   <p className="text-sm font-semibold text-amber-900">Pending Leave Approvals</p>
                   <p className="mt-1 text-sm text-amber-800">
-                    There {pendingCount === 1 ? "is" : "are"}{" "}
-                    <span className="font-semibold">{pendingCount}</span> pending leave{" "}
-                    {pendingCount === 1 ? "request" : "requests"} awaiting approver action.
+                    <span className="font-semibold">{pendingLabel}</span>
                   </p>
                 </div>
               </div>
@@ -124,6 +115,18 @@ export default async function DashboardPage({
             </div>
           </section>
         ) : null}
+
+        <ApprovedLeaveCalendar
+          title="Employees on approved leave"
+          subtitle="Select any date to see the employees on approved leave for that day."
+          data={leaveCalendarData}
+          basePath="/dashboard"
+          extraSearchParams={{
+            attendanceDate,
+            month: params.month,
+            attendancePage: params.attendancePage,
+          }}
+        />
 
         <section className="card mx-auto max-w-3xl p-5">
           <h2 className="section-title">Attendance for selected date</h2>
@@ -210,11 +213,13 @@ export default async function DashboardPage({
     currentMonth,
   );
 
-  const [focusCalendarData, approvedLeaveCalendarData] = await Promise.all([
+  const [focusCalendarData, approvedLeaveCalendarData, pendingApprovalInfo, selectedApproverIds] = await Promise.all([
     getAttendanceCalendarData(user.id, focusMonth, resolvedJoiningDate),
     user.userType === "TEAM_LEAD" || (user.userType === "MANAGER" && user.functionalRole !== "PROJECT_MANAGER")
       ? getApprovedLeaveMonthCalendar(leaveMonth)
       : Promise.resolve(null),
+    getPendingLeaveApprovalInfoForUser(user),
+    getGlobalApproverAssignmentIds(),
   ]);
 
   const hasMarkIn = Boolean(snapshot.attendanceStatus.markIn);
@@ -222,6 +227,12 @@ export default async function DashboardPage({
   const shift = snapshot.leaveBalance.shift;
   const canMarkInNow = !hasMarkIn && isMarkInWindow(new Date(), shift);
   const canMarkOutNow = hasMarkIn && !hasMarkOut && isMarkOutWindow(new Date(), shift);
+  const canOpenLeaveApprovals = isAdmin(user) || isHR(user) || selectedApproverIds.includes(user.id);
+    const pendingCount = pendingApprovalInfo.count;
+    const pendingLabel =
+      pendingApprovalInfo.mode === "total"
+        ? `There ${pendingCount === 1 ? "is" : "are"} ${pendingCount} pending leave ${pendingCount === 1 ? "request" : "requests"} awaiting approver action.`
+        : `There ${pendingCount === 1 ? "is" : "are"} ${pendingCount} pending leave ${pendingCount === 1 ? "request" : "requests"} assigned to you as approver.`;
 
   return (
     <div className="space-y-6">
@@ -234,6 +245,27 @@ export default async function DashboardPage({
           </Link>
         }
       />
+
+        {pendingCount > 0 && canOpenLeaveApprovals ? (
+          <section className="rounded-3xl border border-amber-200 bg-amber-50 px-6 py-5 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="rounded-2xl bg-amber-100 p-3 text-amber-700">
+                  <Bell className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-amber-900">Pending Leave Approvals</p>
+                  <p className="mt-1 text-sm text-amber-800">
+                    <span className="font-semibold">{pendingLabel}</span>
+                  </p>
+                </div>
+              </div>
+              <Link className="btn-secondary" href="/leave-approvals">
+                Open Leave Approvals
+              </Link>
+            </div>
+          </section>
+        ) : null}
 
       <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
         <div className="flex items-center gap-2 font-medium text-slate-900">

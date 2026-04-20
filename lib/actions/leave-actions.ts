@@ -328,25 +328,28 @@ export async function reviewLeaveRequestAction(formData: FormData) {
 
   const existing = await db.leaveRequest.findUnique({
     where: { id },
-    include: {
-      user: {
-        include: {
-          leaveApproverAssignments: true,
-        },
-      },
-    },
   });
 
   if (!existing) {
     throw new Error("Leave request not found.");
   }
 
-  const canAct =
-    existing.approverId === user.id ||
-    existing.user.leaveApproverAssignments.some((row) => row.approverId === user.id);
+  const isGloballyAssignedApprover = Boolean(
+    await db.leaveApproverAssignment.findFirst({
+      where: { approverId: user.id },
+      select: { id: true },
+    }),
+  );
+
+  const isAdminProjectManagerApprover =
+    user.userType === "ADMIN" &&
+    user.functionalRole === "PROJECT_MANAGER" &&
+    isGloballyAssignedApprover;
+
+  const canAct = existing.approverId === user.id || isAdminProjectManagerApprover;
 
   if (!canAct) {
-    throw new Error("Only a designated approver can approve, reject, or reconsider this leave request.");
+    throw new Error("Only the selected approver or an Admin user with functional role Project Manager who is included in the approver list can approve, reject, or reconsider this leave request.");
   }
 
   if (decision === "APPROVED") {
