@@ -1,4 +1,5 @@
 export const IST_OFFSET_MINUTES = 330;
+export type AttendanceShift = "DAY" | "NIGHT";
 
 function formatDateParts(year: number, month: number, day: number) {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
@@ -58,10 +59,20 @@ export function formatDateInIst(date: Date | string | null | undefined) {
   }).format(value);
 }
 
-export function getAttendanceWorkDateKey(date: Date = new Date()) {
+export function getAttendanceWorkDateKey(date: Date = new Date(), shift: AttendanceShift = "DAY") {
   const ist = toIstDate(date);
   const hours = ist.getUTCHours();
   const minutes = ist.getUTCMinutes();
+
+  if (shift === "NIGHT") {
+    const total = hours * 60 + minutes;
+    if (total < 21 * 60) {
+      const prev = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() - 1, 12, 0, 0));
+      return formatDateParts(prev.getUTCFullYear(), prev.getUTCMonth() + 1, prev.getUTCDate());
+    }
+    return formatDateParts(ist.getUTCFullYear(), ist.getUTCMonth() + 1, ist.getUTCDate());
+  }
+
   if (hours < 8 || (hours === 8 && minutes <= 29)) {
     const prev = new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() - 1, 12, 0, 0));
     return formatDateParts(prev.getUTCFullYear(), prev.getUTCMonth() + 1, prev.getUTCDate());
@@ -69,16 +80,34 @@ export function getAttendanceWorkDateKey(date: Date = new Date()) {
   return formatDateParts(ist.getUTCFullYear(), ist.getUTCMonth() + 1, ist.getUTCDate());
 }
 
-export function isMarkInWindow(date: Date = new Date()) {
+export function isMarkInWindow(date: Date = new Date(), shift: AttendanceShift = "DAY") {
   const { hours, minutes } = getIstTimeParts(date);
   const total = hours * 60 + minutes;
+  if (shift === "NIGHT") {
+    return total >= 21 * 60 || total <= 3 * 60;
+  }
   return total >= 8 * 60 + 30 && total <= 15 * 60;
 }
 
-export function isMarkOutWindow(date: Date = new Date()) {
+export function isMarkOutWindow(date: Date = new Date(), shift: AttendanceShift = "DAY") {
   const { hours, minutes } = getIstTimeParts(date);
   const total = hours * 60 + minutes;
+  if (shift === "NIGHT") {
+    return total >= 1 * 60 && total <= 20 * 60 + 59;
+  }
   return total >= 12 * 60 || total <= 8 * 60 + 29;
+}
+
+export function getMarkInWindowLabel(shift: AttendanceShift = "DAY") {
+  return shift === "NIGHT"
+    ? "Mark-In: 9:00 PM to 3:00 AM IST."
+    : "Mark-In: 8:30 AM to 3:00 PM IST.";
+}
+
+export function getMarkOutWindowLabel(shift: AttendanceShift = "DAY") {
+  return shift === "NIGHT"
+    ? "Mark-Out: 1:00 AM to 8:59 PM IST."
+    : "Mark-Out: 12:00 PM IST to 8:29 AM IST next day.";
 }
 
 export function getMonthKey(date: Date) {
@@ -115,4 +144,27 @@ export function getInitialCalendarStartMonth(joiningDate: Date | null | undefine
     return getMonthKey(new Date(Date.UTC(joiningIst.getUTCFullYear(), joiningIst.getUTCMonth(), 1, 12, 0, 0)));
   }
   return shiftMonthKey(currentMonth, -12);
+}
+
+export function getWeekday(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day, 12, 0, 0)).getUTCDay();
+}
+
+export function isWeekendDateKey(dateKey: string) {
+  const day = getWeekday(dateKey);
+  return day === 0 || day === 6;
+}
+
+export function getTodayWeekdayRangeInIst(today: Date = new Date()) {
+  const todayKey = getIstDateKey(today);
+  const weekday = getWeekday(todayKey);
+  const mondayOffset = weekday === 0 ? -6 : 1 - weekday;
+  const fridayOffset = weekday === 0 ? -2 : 5 - weekday;
+  const mondayDate = new Date(getDisplayDateFromKey(todayKey).getTime() + mondayOffset * 86400000);
+  const fridayDate = new Date(getDisplayDateFromKey(todayKey).getTime() + fridayOffset * 86400000);
+  return {
+    startDateKey: formatDateParts(mondayDate.getUTCFullYear(), mondayDate.getUTCMonth() + 1, mondayDate.getUTCDate()),
+    endDateKey: formatDateParts(fridayDate.getUTCFullYear(), fridayDate.getUTCMonth() + 1, fridayDate.getUTCDate()),
+  };
 }

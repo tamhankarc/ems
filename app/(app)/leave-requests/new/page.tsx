@@ -25,7 +25,7 @@ export default async function NewLeaveRequestPage() {
     <div className="space-y-6">
       <PageHeader
         title="Create Leave Request"
-        description="Create a new leave request for approval."
+        description="Create a new leave request for approval. Start and end dates cannot be weekends or official holidays."
         actions={
           <Link className="btn-secondary" href="/leave-requests">
             Back to Leave Requests
@@ -38,6 +38,8 @@ export default async function NewLeaveRequestPage() {
         approvers={data.approvers}
         mode="create"
         minDate={todayKey}
+        leaveBalance={data.leaveBalance}
+        blockedDateKeys={data.officialHolidays}
       />
     </div>
   );

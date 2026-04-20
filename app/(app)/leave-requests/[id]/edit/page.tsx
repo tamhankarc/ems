@@ -55,7 +55,7 @@ export default async function EditLeaveRequestPage({
     <div className="space-y-6">
       <PageHeader
         title="Edit Leave Request"
-        description="Update and resubmit the leave request marked for reconsideration."
+        description="Update and resubmit the leave request marked for reconsideration. Start and end dates cannot be weekends or official holidays."
         actions={
           <Link className="btn-secondary" href="/leave-requests">
             Back to Leave Requests
@@ -68,9 +68,10 @@ export default async function EditLeaveRequestPage({
         approvers={data.approvers}
         mode="edit"
         minDate={minDate}
+        leaveBalance={data.leaveBalance}
+        blockedDateKeys={data.officialHolidays}
         initialValues={{
           id: editRequest.id,
-          leaveType: editRequest.leaveType,
           startDate: getIstDateKey(editRequest.startDate),
           endDate: getIstDateKey(editRequest.endDate),
           reason: parsed.reason,

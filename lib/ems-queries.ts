@@ -1,4 +1,5 @@
 import "server-only";
+import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import {
   getAttendanceWorkDateKey,
@@ -7,7 +8,66 @@ import {
   getIstDateKey,
   getMonthEndUtcExclusiveFromIstKey,
   getMonthStartUtcFromIstKey,
+  shiftMonthKey,
+  isWeekendDateKey,
 } from "@/lib/ist";
+
+export function isLeaveAllowedUser(user: { userType: string; functionalRole?: string | null; isActive?: boolean }) {
+  if (user.isActive === false) return false;
+  if (user.userType === "REPORT_VIEWER" || user.userType === "ACCOUNTS") return false;
+  if (user.userType === "ADMIN" && ["DIRECTOR", "OTHER"].includes(user.functionalRole ?? "")) return false;
+  return true;
+}
+
+
+export async function getApprovedLeaveMonthCalendar(monthKey: string) {
+  const monthStart = getMonthStartUtcFromIstKey(monthKey);
+  const monthEndExclusive = getMonthEndUtcExclusiveFromIstKey(monthKey);
+  const rows = await db.leaveRequest.findMany({
+    where: {
+      status: "APPROVED",
+      startDate: { lt: monthEndExclusive },
+      endDate: { gte: monthStart },
+    },
+    select: {
+      startDate: true,
+      endDate: true,
+      user: {
+        select: {
+          fullName: true,
+        },
+      },
+    },
+    orderBy: [{ startDate: "asc" }, { user: { fullName: "asc" } }],
+  });
+
+  const itemsByDate: Record<string, string[]> = {}
+  for (const row of rows) {
+    let cursorKey = getIstDateKey(row.startDate);
+    const endKey = getIstDateKey(row.endDate);
+    while (cursorKey <= endKey) {
+      if (cursorKey.startsWith(monthKey)) {
+        if (!itemsByDate[cursorKey]) itemsByDate[cursorKey] = [];
+        itemsByDate[cursorKey].push(row.user.fullName);
+      }
+      const nextStart = getDayBoundsUtcFromIstDateKey(cursorKey).endUtc;
+      cursorKey = getIstDateKey(nextStart);
+    }
+  }
+
+  Object.keys(itemsByDate).forEach((dateKey) => {
+    itemsByDate[dateKey] = [...new Set(itemsByDate[dateKey])].sort((a, b) => a.localeCompare(b));
+  });
+
+  const currentMonth = getIstDateKey().slice(0, 7);
+  return {
+    monthKey,
+    selectedDateKey: getIstDateKey(),
+    minMonthKey: shiftMonthKey(currentMonth, -12),
+    maxMonthKey: shiftMonthKey(currentMonth, 12),
+    itemsByDate,
+  };
+}
 
 export async function getPendingLeaveCount() {
   return db.leaveRequest.count({ where: { status: "PENDING" } });
@@ -17,11 +77,7 @@ export async function getApproverOptions() {
   return db.user.findMany({
     where: {
       isActive: true,
-      OR: [
-        { userType: "TEAM_LEAD" },
-        { userType: "MANAGER" },
-        { userType: "ADMIN" },
-      ],
+      OR: [{ userType: "TEAM_LEAD" }, { userType: "MANAGER" }, { userType: "ADMIN" }],
     },
     select: {
       id: true,
@@ -58,8 +114,12 @@ export async function getEligibleEmployeeIdsForGlobalApproverAssignment() {
   return rows.map((row) => row.id);
 }
 
-export async function getAdminDashboardData(dateKey: string) {
-  const { startUtc, endUtc } = getDayBoundsUtcFromIstDateKey(dateKey);
+export async function getAdminDashboardData(attendanceDateKey: string, leaveStartDateKey?: string, leaveEndDateKey?: string) {
+  const attendanceBounds = getDayBoundsUtcFromIstDateKey(attendanceDateKey);
+  const rangeStartKey = leaveStartDateKey || attendanceDateKey;
+  const rangeEndKey = leaveEndDateKey || attendanceDateKey;
+  const leaveStartBounds = getDayBoundsUtcFromIstDateKey(rangeStartKey);
+  const leaveEndBounds = getDayBoundsUtcFromIstDateKey(rangeEndKey);
 
   const employees = await db.user.findMany({
     where: {
@@ -77,7 +137,7 @@ export async function getAdminDashboardData(dateKey: string) {
       functionalRole: true,
       attendanceLogs: {
         where: {
-          attendanceDate: { gte: startUtc, lt: endUtc },
+          attendanceDate: { gte: attendanceBounds.startUtc, lt: attendanceBounds.endUtc },
         },
         orderBy: { markedAt: "asc" },
         select: {
@@ -94,14 +154,18 @@ export async function getAdminDashboardData(dateKey: string) {
   const approvedLeaves = await db.leaveRequest.findMany({
     where: {
       status: "APPROVED",
-      startDate: { lt: endUtc },
-      endDate: { gte: startUtc },
+      startDate: { lt: leaveEndBounds.endUtc },
+      endDate: { gte: leaveStartBounds.startUtc },
     },
     select: {
       id: true,
       leaveType: true,
       startDate: true,
       endDate: true,
+      totalLeaveDays: true,
+      casualDaysUsed: true,
+      earnedDaysUsed: true,
+      unpaidDaysUsed: true,
       user: {
         select: {
           fullName: true,
@@ -110,7 +174,7 @@ export async function getAdminDashboardData(dateKey: string) {
         },
       },
     },
-    orderBy: [{ user: { fullName: "asc" } }],
+    orderBy: [{ startDate: "asc" }, { user: { fullName: "asc" } }],
   });
 
   return {
@@ -132,7 +196,9 @@ export async function getAdminDashboardData(dateKey: string) {
 }
 
 export async function getAttendanceStatusForUser(userId: string) {
-  const todayWorkDateKey = getAttendanceWorkDateKey();
+  const year = Number(getIstDateKey().slice(0, 4));
+  const leaveBalance = await getLeaveBalanceForUser(userId, year);
+  const todayWorkDateKey = getAttendanceWorkDateKey(new Date(), leaveBalance.shift);
   const { startUtc, endUtc } = getDayBoundsUtcFromIstDateKey(todayWorkDateKey);
   const rows = await db.attendanceLog.findMany({
     where: {
@@ -145,11 +211,11 @@ export async function getAttendanceStatusForUser(userId: string) {
   const markIn = rows.find((row) => row.type === "MARK_IN") ?? null;
   const markOut = [...rows].reverse().find((row) => row.type === "MARK_OUT") ?? null;
 
-  return { dateKey: todayWorkDateKey, markIn, markOut };
+  return { dateKey: todayWorkDateKey, markIn, markOut, shift: leaveBalance.shift };
 }
 
 export async function getEmployeeDashboardSnapshot(userId: string) {
-  const [attendanceStatus, leaveSummary] = await Promise.all([
+  const [attendanceStatus, leaveSummary, leaveBalance] = await Promise.all([
     getAttendanceStatusForUser(userId),
     db.leaveRequest.findMany({
       where: {
@@ -159,9 +225,10 @@ export async function getEmployeeDashboardSnapshot(userId: string) {
       orderBy: [{ startDate: "asc" }],
       take: 5,
     }),
+    getLeaveBalanceForUser(userId, new Date().getUTCFullYear()),
   ]);
 
-  return { attendanceStatus, leaveSummary };
+  return { attendanceStatus, leaveSummary, leaveBalance };
 }
 
 export async function getAttendanceCalendarData(userId: string, monthKey: string, joiningDate: Date | null | undefined) {
@@ -197,18 +264,27 @@ export async function getAttendanceCalendarData(userId: string, monthKey: string
   ]);
 
   const presentDays = new Set(
-    attendanceRows
-      .filter((row) => row.type === "MARK_IN")
-      .map((row) => getIstDateKey(row.attendanceDate)),
+    attendanceRows.filter((row) => row.type === "MARK_IN").map((row) => getIstDateKey(row.attendanceDate)),
   );
 
+  const holidayRows = await db.officialHoliday.findMany({
+    where: {
+      holidayDate: { gte: monthStart, lt: monthEndExclusive },
+    },
+    select: { holidayDate: true },
+  });
+
+  const holidayKeys = new Set(holidayRows.map((row) => getIstDateKey(row.holidayDate)));
   const leaveDays = new Set<string>();
   for (const row of leaveRows) {
-    let cursor = new Date(row.startDate);
-    while (cursor < row.endDate || cursor.getTime() === row.endDate.getTime()) {
-      const key = getIstDateKey(cursor);
-      if (key.startsWith(monthKey)) leaveDays.add(key);
-      cursor = new Date(cursor.getTime() + 24 * 60 * 60 * 1000);
+    let cursorKey = getIstDateKey(row.startDate);
+    const endKey = getIstDateKey(row.endDate);
+    while (cursorKey <= endKey) {
+      if (cursorKey.startsWith(monthKey) && !isWeekendDateKey(cursorKey) && !holidayKeys.has(cursorKey)) {
+        leaveDays.add(cursorKey);
+      }
+      const nextStart = getDayBoundsUtcFromIstDateKey(cursorKey).endUtc;
+      cursorKey = getIstDateKey(nextStart);
     }
   }
 
@@ -246,10 +322,7 @@ export async function getAllowedLeaveRequestApproversForUser(userId: string) {
 
     return assignments
       .map((row) => row.approver)
-      .filter((approver) =>
-        approver.userType === "TEAM_LEAD" ||
-        (approver.userType === "MANAGER"),
-      );
+      .filter((approver) => approver.userType === "TEAM_LEAD" || approver.userType === "MANAGER");
   }
 
   if (requester.userType === "TEAM_LEAD" || (requester.userType === "MANAGER" && requester.functionalRole !== "PROJECT_MANAGER")) {
@@ -285,16 +358,24 @@ export async function isValidLeaveRequestApproverForUser(userId: string, approve
   return approvers.some((approver) => approver.id === approverId);
 }
 
+export async function getLeaveBalanceForUser(userId: string, year: number) {
+  const profile = await getOrCreateLeaveYearProfile(userId, year);
+  return {
+    year,
+    casualLeaves: Number(profile.casualLeaves),
+    earnedLeaves: Number(profile.earnedLeaves),
+    shift: profile.shift,
+    employmentStatus: profile.employmentStatus,
+  };
+}
+
 export async function getLeaveRequestsForUser(userId: string, todayDateKey: string) {
   const { startUtc } = getDayBoundsUtcFromIstDateKey(todayDateKey);
 
   const current = await db.leaveRequest.findMany({
     where: {
       userId,
-      OR: [
-        { endDate: { gte: startUtc } },
-        { status: { in: ["PENDING", "APPROVED", "RECONSIDER"] } },
-      ],
+      OR: [{ endDate: { gte: startUtc } }, { status: { in: ["PENDING", "APPROVED", "RECONSIDER"] } }],
     },
     include: {
       approver: {
@@ -308,10 +389,7 @@ export async function getLeaveRequestsForUser(userId: string, todayDateKey: stri
     where: {
       userId,
       NOT: {
-        OR: [
-          { endDate: { gte: startUtc } },
-          { status: { in: ["PENDING", "APPROVED", "RECONSIDER"] } },
-        ],
+        OR: [{ endDate: { gte: startUtc } }, { status: { in: ["PENDING", "APPROVED", "RECONSIDER"] } }],
       },
     },
     include: {
@@ -322,9 +400,13 @@ export async function getLeaveRequestsForUser(userId: string, todayDateKey: stri
     orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
   });
 
-  const approvers = await getAllowedLeaveRequestApproversForUser(userId);
+  const [approvers, leaveBalance, officialHolidays] = await Promise.all([
+    getAllowedLeaveRequestApproversForUser(userId),
+    getLeaveBalanceForUser(userId, Number(todayDateKey.slice(0, 4))),
+    getOfficialHolidayDateKeysForYear(Number(todayDateKey.slice(0, 4))),
+  ]);
 
-  return { current, past, approvers };
+  return { current, past, approvers, leaveBalance, officialHolidays };
 }
 
 export async function getLeaveApprovalsForUser(viewerId: string, restrictToAssigned: boolean) {
@@ -353,4 +435,119 @@ export async function getLeaveApprovalsForUser(viewerId: string, restrictToAssig
     },
     orderBy: [{ status: "asc" }, { createdAt: "desc" }],
   });
+}
+
+function getQuarterCountForToday(year: number) {
+  const todayKey = getIstDateKey();
+  if (!todayKey.startsWith(String(year))) return 4;
+  const month = Number(todayKey.slice(5, 7));
+  return month <= 3 ? 1 : month <= 6 ? 2 : month <= 9 ? 3 : 4;
+}
+
+export async function getOrCreateLeaveYearProfile(userId: string, year: number) {
+  const existing = await db.leaveYearProfile.findUnique({ where: { userId_year: { userId, year } } });
+  if (existing) return existing;
+
+  const previous = await db.leaveYearProfile.findUnique({ where: { userId_year: { userId, year: year - 1 } } });
+  const carryForwardEarned = Math.min(Number(previous?.earnedLeaves ?? 0), 45);
+  const initialEarned = carryForwardEarned + 12.96;
+  const initialCasual = getQuarterCountForToday(year) * 2;
+
+  return db.leaveYearProfile.create({
+    data: {
+      userId,
+      year,
+      casualLeaves: new Prisma.Decimal(initialCasual.toFixed(2)),
+      earnedLeaves: new Prisma.Decimal(initialEarned.toFixed(2)),
+      shift: previous?.shift ?? "DAY",
+      employmentStatus: previous?.employmentStatus ?? "PROBATION",
+    },
+  });
+}
+
+export async function getOfficialHolidayDateKeysForYear(year: number) {
+  const rows = await db.officialHoliday.findMany({
+    where: { year },
+    orderBy: { holidayDate: "asc" },
+    select: { holidayDate: true },
+  });
+  return rows.map((row) => getIstDateKey(row.holidayDate));
+}
+
+export async function getOfficialHolidaysForYear(year: number) {
+  return db.officialHoliday.findMany({
+    where: { year },
+    orderBy: { holidayDate: "asc" },
+  });
+}
+
+export async function getLeaveAdminList(filters?: { functionalRole?: string; userId?: string; page?: number; pageSize?: number }) {
+  const page = filters?.page && filters.page > 0 ? filters.page : 1;
+  const pageSize = filters?.pageSize && filters.pageSize > 0 ? filters.pageSize : 10;
+  const year = Number(getIstDateKey().slice(0, 4));
+
+  const userWhere: Prisma.UserWhereInput = {
+    isActive: true,
+    AND: [
+      { NOT: [{ userType: "REPORT_VIEWER" }, { userType: "ACCOUNTS" }] },
+      { NOT: [{ userType: "ADMIN", functionalRole: { in: ["DIRECTOR", "OTHER"] } }] },
+    ],
+  };
+
+  if (filters?.functionalRole) {
+    userWhere.functionalRole = filters.functionalRole as never;
+  }
+  if (filters?.userId) {
+    userWhere.id = filters.userId;
+  }
+
+  const [totalItems, users, nameOptions, holidays] = await Promise.all([
+    db.user.count({ where: userWhere }),
+    db.user.findMany({
+      where: userWhere,
+      orderBy: { fullName: "asc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      select: {
+        id: true,
+        fullName: true,
+        userType: true,
+        functionalRole: true,
+        leaveYearProfiles: {
+          where: { year },
+          take: 1,
+          orderBy: { year: "desc" },
+        },
+      },
+    }),
+    db.user.findMany({
+      where: filters?.functionalRole
+        ? {
+            ...userWhere,
+            functionalRole: filters.functionalRole as never,
+          }
+        : userWhere,
+      orderBy: { fullName: "asc" },
+      select: { id: true, fullName: true },
+    }),
+    getOfficialHolidaysForYear(year),
+  ]);
+
+  const hydratedUsers = await Promise.all(
+    users.map(async (user) => ({
+      ...user,
+      profile: user.leaveYearProfiles[0] ?? (await getOrCreateLeaveYearProfile(user.id, year)),
+    })),
+  );
+
+  return {
+    year,
+    users: hydratedUsers,
+    totalItems,
+    currentPage: page,
+    totalPages: Math.max(1, Math.ceil(totalItems / pageSize)),
+    pageSize,
+    nameOptions,
+    holidays,
+  };
 }

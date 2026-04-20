@@ -8,10 +8,16 @@ import { logoutAction } from "@/lib/actions/auth-actions";
 import type { SessionUser } from "@/lib/auth";
 import { getSidebarItems } from "@/components/layout/sidebar";
 
-export function MobileSidebar({ user }: { user: SessionUser }) {
+export function MobileSidebar({
+  user,
+  canAccessLeaveApprovals,
+}: {
+  user: SessionUser;
+  canAccessLeaveApprovals: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const items = getSidebarItems(user);
+  const items = getSidebarItems(user, canAccessLeaveApprovals);
 
   useEffect(() => {
     setMounted(true);

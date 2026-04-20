@@ -6,6 +6,22 @@ import { getIstDateKey, formatDateInIst } from "@/lib/ist";
 import { cancelLeaveRequestAction, deleteLeaveRequestAction } from "@/lib/actions/leave-actions";
 import { getLeaveRequestsForUser } from "@/lib/ems-queries";
 
+function getLeaveBreakupLabel(row: {
+  casualDaysUsed?: unknown;
+  earnedDaysUsed?: unknown;
+  unpaidDaysUsed?: unknown;
+  totalLeaveDays?: unknown;
+}) {
+  const casual = Number(row.casualDaysUsed ?? 0);
+  const earned = Number(row.earnedDaysUsed ?? 0);
+  const unpaid = Number(row.unpaidDaysUsed ?? 0);
+  const parts = [] as string[];
+  if (casual > 0) parts.push(`Casual ${casual.toFixed(2)}`);
+  if (earned > 0) parts.push(`Earned ${earned.toFixed(2)}`);
+  if (unpaid > 0) parts.push(`Unpaid ${unpaid.toFixed(2)}`);
+  return parts.length ? parts.join(" · ") : `Working leave days ${Number(row.totalLeaveDays ?? 0).toFixed(2)}`;
+}
+
 export default async function LeaveRequestsPage() {
   const user = await requireUser();
 
@@ -31,6 +47,15 @@ export default async function LeaveRequestsPage() {
         }
       />
 
+      <section className="card p-5">
+        <h2 className="section-title">Leaves remaining</h2>
+        <p className="section-subtitle">Current year balance available for paid leave deduction.</p>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-700">Casual leaves remaining <span className="ml-2 font-semibold text-slate-900">{data.leaveBalance.casualLeaves.toFixed(2)}</span></div>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-700">Earned leaves remaining <span className="ml-2 font-semibold text-slate-900">{data.leaveBalance.earnedLeaves.toFixed(2)}</span></div>
+        </div>
+      </section>
+
       <section className="table-wrap">
         <div className="border-b border-slate-200 px-6 py-5">
           <h2 className="section-title">Current requests</h2>
@@ -39,7 +64,7 @@ export default async function LeaveRequestsPage() {
         <table className="table-base">
           <thead className="table-head">
             <tr>
-              <th className="table-cell">Leave type</th>
+              <th className="table-cell">Leave breakup</th>
               <th className="table-cell">Date range</th>
               <th className="table-cell">Approver</th>
               <th className="table-cell">Status</th>
@@ -50,7 +75,7 @@ export default async function LeaveRequestsPage() {
           <tbody className="divide-y divide-slate-100">
             {data.current.map((row) => (
               <tr key={row.id}>
-                <td className="table-cell">{row.leaveType.replaceAll("_", " ")}</td>
+                <td className="table-cell">{getLeaveBreakupLabel(row)}</td>
                 <td className="table-cell">{formatDateInIst(row.startDate)} - {formatDateInIst(row.endDate)}</td>
                 <td className="table-cell">{row.approver?.fullName || "—"}</td>
                 <td className="table-cell"><span className="badge-blue">{row.status.replaceAll("_", " ")}</span></td>
@@ -95,7 +120,7 @@ export default async function LeaveRequestsPage() {
         <table className="table-base">
           <thead className="table-head">
             <tr>
-              <th className="table-cell">Leave type</th>
+              <th className="table-cell">Leave breakup</th>
               <th className="table-cell">Date range</th>
               <th className="table-cell">Approver</th>
               <th className="table-cell">Status</th>
@@ -105,7 +130,7 @@ export default async function LeaveRequestsPage() {
           <tbody className="divide-y divide-slate-100">
             {data.past.map((row) => (
               <tr key={row.id}>
-                <td className="table-cell">{row.leaveType.replaceAll("_", " ")}</td>
+                <td className="table-cell">{getLeaveBreakupLabel(row)}</td>
                 <td className="table-cell">{formatDateInIst(row.startDate)} - {formatDateInIst(row.endDate)}</td>
                 <td className="table-cell">{row.approver?.fullName || "—"}</td>
                 <td className="table-cell"><span className="badge-slate">{row.status.replaceAll("_", " ")}</span></td>

@@ -1,7 +1,8 @@
 import { PageHeader } from "@/components/ui/page-header";
 import { PaginationControls } from "@/components/ui/pagination-controls";
 import { requireUser } from "@/lib/auth";
-import { canViewEMSAdminDashboard } from "@/lib/permissions";
+import { redirect } from "next/navigation";
+import { canViewEMSAdminDashboard, isAdmin, isHR } from "@/lib/permissions";
 import { getLeaveApprovalsForUser, getGlobalApproverAssignmentIds } from "@/lib/ems-queries";
 import { formatDateInIst } from "@/lib/ist";
 import { paginateItems, parsePageParam } from "@/lib/pagination";
@@ -14,7 +15,14 @@ export default async function LeaveApprovalsPage({
 }) {
   const user = await requireUser();
   const selectedApproverIds = await getGlobalApproverAssignmentIds();
-  const canAct = selectedApproverIds.includes(user.id);
+  const isDesignatedApprover = selectedApproverIds.includes(user.id);
+  const canAccessPage = isAdmin(user) || isHR(user) || isDesignatedApprover;
+
+  if (!canAccessPage) {
+    redirect("/dashboard");
+  }
+
+  const canAct = isDesignatedApprover;
   const canViewAll = canViewEMSAdminDashboard(user);
   const rows = await getLeaveApprovalsForUser(user.id, !canViewAll);
   const params = (await searchParams) ?? {};
@@ -27,7 +35,7 @@ export default async function LeaveApprovalsPage({
         description={
           canAct
             ? "Review leave requests assigned to you as a designated approver."
-            : "Admin, HR, Managers and Team Leads can view leave requests. Only designated approvers can take approval actions."
+            : "Admins and HR can view leave requests. Only designated approvers can take approval actions."
         }
       />
 

@@ -2,12 +2,18 @@ import type { SessionUser } from "@/lib/auth";
 import { MobileSidebar } from "@/components/layout/mobile-sidebar";
 import { logoutAction } from "@/lib/actions/auth-actions";
 
-export function Topbar({ user }: { user: SessionUser }) {
+export function Topbar({
+  user,
+  canAccessLeaveApprovals,
+}: {
+  user: SessionUser;
+  canAccessLeaveApprovals: boolean;
+}) {
   return (
     <header className="border-b border-slate-200 bg-white/80 backdrop-blur">
       <div className="container-page flex items-center justify-between gap-4 py-4">
         <div className="flex items-center gap-3">
-          <MobileSidebar user={user} />
+          <MobileSidebar user={user} canAccessLeaveApprovals={canAccessLeaveApprovals} />
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-brand-700">EMS</p>
             <h1 className="text-lg font-semibold text-slate-900">Attendance &amp; Leave Management</h1>

@@ -1,19 +1,21 @@
 "use server";
 
+import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireUserForAction } from "@/lib/auth";
 import { canAccessLeaveRequests, canAssignApprovers } from "@/lib/permissions";
-import { getDayBoundsUtcFromIstDateKey, getIstDateKey } from "@/lib/ist";
+import { getDayBoundsUtcFromIstDateKey, getIstDateKey, isWeekendDateKey } from "@/lib/ist";
 import {
   getEligibleEmployeeIdsForGlobalApproverAssignment,
+  getOfficialHolidayDateKeysForYear,
+  getOrCreateLeaveYearProfile,
   isValidLeaveRequestApproverForUser,
 } from "@/lib/ems-queries";
 
 const leaveSchema = z.object({
   id: z.string().optional(),
-  leaveType: z.enum(["CASUAL", "SICK", "EARNED"]),
   startDate: z.string().min(1),
   endDate: z.string().min(1),
   reason: z.string().trim().min(1, "Reason is required.").max(3000),
@@ -51,6 +53,47 @@ function validateStartDateNotInPast(startDate: string) {
   }
 }
 
+async function validateBoundaryDates(startDate: string, endDate: string) {
+  const holidayKeys = new Set(await getOfficialHolidayDateKeysForYear(Number(startDate.slice(0, 4))));
+  if (isWeekendDateKey(startDate) || holidayKeys.has(startDate)) {
+    throw new Error("Start date cannot be a Saturday, Sunday, or official holiday.");
+  }
+  if (isWeekendDateKey(endDate) || holidayKeys.has(endDate)) {
+    throw new Error("End date cannot be a Saturday, Sunday, or official holiday.");
+  }
+}
+
+async function computeLeaveBreakup(startDateKey: string, endDateKey: string, userId: string) {
+  const year = Number(startDateKey.slice(0, 4));
+  const profile = await getOrCreateLeaveYearProfile(userId, year);
+  const holidayKeys = new Set(await getOfficialHolidayDateKeysForYear(year));
+  let workingDays = 0;
+  let cursor = startDateKey;
+  while (cursor <= endDateKey) {
+    if (!isWeekendDateKey(cursor) && !holidayKeys.has(cursor)) {
+      workingDays += 1;
+    }
+    cursor = getIstDateKey(getDayBoundsUtcFromIstDateKey(cursor).endUtc);
+  }
+  const casualAvailable = Number(profile.casualLeaves);
+  const earnedAvailable = Number(profile.earnedLeaves);
+  const casualDaysUsed = Math.min(casualAvailable, workingDays);
+  const remainingAfterCasual = workingDays - casualDaysUsed;
+  const earnedDaysUsed = Math.min(earnedAvailable, remainingAfterCasual);
+  const unpaidDaysUsed = Math.max(0, remainingAfterCasual - earnedDaysUsed);
+  const effectiveType = casualDaysUsed > 0 ? "CASUAL" : earnedDaysUsed > 0 ? "EARNED" : "UNPAID";
+
+  return {
+    profile,
+    year,
+    totalLeaveDays: workingDays,
+    casualDaysUsed,
+    earnedDaysUsed,
+    unpaidDaysUsed,
+    leaveType: effectiveType as "CASUAL" | "EARNED" | "UNPAID",
+  };
+}
+
 export type LeaveFormState = {
   success?: boolean;
   error?: string;
@@ -68,7 +111,6 @@ export async function createLeaveRequestAction(
     }
 
     const parsed = leaveSchema.safeParse({
-      leaveType: formData.get("leaveType"),
       startDate: formData.get("startDate"),
       endDate: formData.get("endDate"),
       reason: formData.get("reason") || "",
@@ -87,16 +129,22 @@ export async function createLeaveRequestAction(
     }
 
     validateStartDateNotInPast(parsed.data.startDate);
+    await validateBoundaryDates(parsed.data.startDate, parsed.data.endDate);
     const { start, end } = parseDateRange(parsed.data.startDate, parsed.data.endDate);
+    const breakup = await computeLeaveBreakup(parsed.data.startDate, parsed.data.endDate, user.id);
 
     await db.leaveRequest.create({
       data: {
         userId: user.id,
-        leaveType: parsed.data.leaveType,
+        leaveType: breakup.leaveType,
         startDate: start,
         endDate: end,
         reason: buildReason(parsed.data.reason, parsed.data.diwaliLeave),
         approverId: parsed.data.approverId,
+        totalLeaveDays: new Prisma.Decimal(breakup.totalLeaveDays.toFixed(2)),
+        casualDaysUsed: new Prisma.Decimal(breakup.casualDaysUsed.toFixed(2)),
+        earnedDaysUsed: new Prisma.Decimal(breakup.earnedDaysUsed.toFixed(2)),
+        unpaidDaysUsed: new Prisma.Decimal(breakup.unpaidDaysUsed.toFixed(2)),
       },
     });
 
@@ -123,7 +171,6 @@ export async function updateLeaveRequestAction(
 
     const parsed = leaveSchema.extend({ id: z.string().min(1) }).safeParse({
       id: formData.get("id"),
-      leaveType: formData.get("leaveType"),
       startDate: formData.get("startDate"),
       endDate: formData.get("endDate"),
       reason: formData.get("reason") || "",
@@ -154,12 +201,14 @@ export async function updateLeaveRequestAction(
     }
 
     validateStartDateNotInPast(parsed.data.startDate);
+    await validateBoundaryDates(parsed.data.startDate, parsed.data.endDate);
     const { start, end } = parseDateRange(parsed.data.startDate, parsed.data.endDate);
+    const breakup = await computeLeaveBreakup(parsed.data.startDate, parsed.data.endDate, user.id);
 
     await db.leaveRequest.update({
       where: { id: parsed.data.id },
       data: {
-        leaveType: parsed.data.leaveType,
+        leaveType: breakup.leaveType,
         startDate: start,
         endDate: end,
         reason: buildReason(parsed.data.reason, parsed.data.diwaliLeave),
@@ -168,6 +217,10 @@ export async function updateLeaveRequestAction(
         reconsiderNote: null,
         rejectedAt: null,
         reconsideredAt: new Date(),
+        totalLeaveDays: new Prisma.Decimal(breakup.totalLeaveDays.toFixed(2)),
+        casualDaysUsed: new Prisma.Decimal(breakup.casualDaysUsed.toFixed(2)),
+        earnedDaysUsed: new Prisma.Decimal(breakup.earnedDaysUsed.toFixed(2)),
+        unpaidDaysUsed: new Prisma.Decimal(breakup.unpaidDaysUsed.toFixed(2)),
       },
     });
 
@@ -239,10 +292,20 @@ export async function cancelLeaveRequestAction(formData: FormData) {
     throw new Error("Past leave requests cannot be cancelled.");
   }
 
-  await db.leaveRequest.update({
-    where: { id },
-    data: { status: "CANCELLED", cancelledAt: new Date() },
-  });
+  const profile = await getOrCreateLeaveYearProfile(user.id, Number(getIstDateKey(existing.startDate).slice(0, 4)));
+  await db.$transaction([
+    db.leaveRequest.update({
+      where: { id },
+      data: { status: "CANCELLED", cancelledAt: new Date() },
+    }),
+    db.leaveYearProfile.update({
+      where: { id: profile.id },
+      data: {
+        casualLeaves: { increment: existing.casualDaysUsed ?? new Prisma.Decimal(0) },
+        earnedLeaves: { increment: existing.earnedDaysUsed ?? new Prisma.Decimal(0) },
+      },
+    }),
+  ]);
 
   revalidatePath("/leave-requests");
   revalidatePath("/leave-approvals");
@@ -286,18 +349,42 @@ export async function reviewLeaveRequestAction(formData: FormData) {
     throw new Error("Only a designated approver can approve, reject, or reconsider this leave request.");
   }
 
-  await db.leaveRequest.update({
-    where: { id },
-    data: {
-      status: decision as "APPROVED" | "REJECTED" | "RECONSIDER",
-      approverId: user.id,
-      approverComment: comment || null,
-      approvedAt: decision === "APPROVED" ? new Date() : null,
-      rejectedAt: decision === "REJECTED" ? new Date() : null,
-      reconsiderNote:
-        decision === "RECONSIDER" ? comment || "Please update and resubmit this request." : null,
-    },
-  });
+  if (decision === "APPROVED") {
+    const profile = await getOrCreateLeaveYearProfile(existing.userId, Number(getIstDateKey(existing.startDate).slice(0, 4)));
+    await db.$transaction([
+      db.leaveRequest.update({
+        where: { id },
+        data: {
+          status: "APPROVED",
+          approverId: user.id,
+          approverComment: comment || null,
+          approvedAt: new Date(),
+          rejectedAt: null,
+          reconsiderNote: null,
+        },
+      }),
+      db.leaveYearProfile.update({
+        where: { id: profile.id },
+        data: {
+          casualLeaves: { decrement: existing.casualDaysUsed ?? new Prisma.Decimal(0) },
+          earnedLeaves: { decrement: existing.earnedDaysUsed ?? new Prisma.Decimal(0) },
+        },
+      }),
+    ]);
+  } else {
+    await db.leaveRequest.update({
+      where: { id },
+      data: {
+        status: decision as "REJECTED" | "RECONSIDER",
+        approverId: user.id,
+        approverComment: comment || null,
+        approvedAt: null,
+        rejectedAt: decision === "REJECTED" ? new Date() : null,
+        reconsiderNote:
+          decision === "RECONSIDER" ? comment || "Please update and resubmit this request." : null,
+      },
+    });
+  }
 
   revalidatePath("/leave-approvals");
   revalidatePath("/leave-requests");

@@ -88,6 +88,16 @@ enum LeaveType {
   OTHER
 }
 
+enum ShiftType {
+  DAY
+  NIGHT
+}
+
+enum EmploymentStatus {
+  PROBATION
+  PERMANENT
+}
+
 model User {
   id                     String              @id @default(cuid())
   fullName               String
@@ -140,6 +150,7 @@ model User {
   leaveApproverAssignments  LeaveApproverAssignment[] @relation("LeaveApproverEmployee")
   approverForEmployees      LeaveApproverAssignment[] @relation("LeaveApproverUser")
   leaveApprovalsAssignedBy  LeaveApproverAssignment[] @relation("LeaveApproverAssignedBy")
+  leaveYearProfiles        LeaveYearProfile[]
 
   @@index([userType, isActive])
   @@index([functionalRole, isActive])
@@ -479,22 +490,26 @@ model AttendanceLog {
 }
 
 model LeaveRequest {
-  id              String      @id @default(cuid())
-  userId          String
-  leaveType       LeaveType
-  startDate       DateTime
-  endDate         DateTime
-  reason          String?     @db.Text
-  status          LeaveStatus @default(PENDING)
-  approverId      String?
-  approverComment String?     @db.Text
-  reconsiderNote  String?     @db.Text
-  cancelledAt     DateTime?
-  approvedAt      DateTime?
-  rejectedAt      DateTime?
-  reconsideredAt  DateTime?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  id                String      @id @default(cuid())
+  userId            String
+  leaveType         LeaveType
+  startDate         DateTime
+  endDate           DateTime
+  reason            String?     @db.Text
+  status            LeaveStatus @default(PENDING)
+  approverId        String?
+  approverComment   String?     @db.Text
+  reconsiderNote    String?     @db.Text
+  cancelledAt       DateTime?
+  approvedAt        DateTime?
+  rejectedAt        DateTime?
+  reconsideredAt    DateTime?
+  totalLeaveDays    Decimal?    @db.Decimal(6, 2)
+  casualDaysUsed    Decimal?    @db.Decimal(6, 2)
+  earnedDaysUsed    Decimal?    @db.Decimal(6, 2)
+  unpaidDaysUsed    Decimal?    @db.Decimal(6, 2)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
 
   user     User  @relation("LeaveRequestEmployee", fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   approver User? @relation("LeaveRequestApprover", fields: [approverId], references: [id], onDelete: SetNull, onUpdate: Cascade)
@@ -516,4 +531,33 @@ model LeaveApproverAssignment {
 
   @@unique([employeeId, approverId])
   @@index([approverId])
+}
+
+
+model LeaveYearProfile {
+  id               String           @id @default(cuid())
+  userId           String
+  year             Int
+  casualLeaves     Decimal          @default(0) @db.Decimal(6, 2)
+  earnedLeaves     Decimal          @default(0) @db.Decimal(6, 2)
+  shift            ShiftType        @default(DAY)
+  employmentStatus EmploymentStatus @default(PROBATION)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([userId, year])
+  @@index([year])
+}
+
+model OfficialHoliday {
+  id          String   @id @default(cuid())
+  name        String
+  holidayDate DateTime @unique
+  year        Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([year, holidayDate])
 }

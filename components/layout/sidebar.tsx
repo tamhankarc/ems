@@ -8,7 +8,7 @@ import {
   CheckCheck,
 } from "lucide-react";
 import type { SessionUser } from "@/lib/auth";
-import { canAccessLeaveRequests, canViewEMSAdminDashboard, canViewLeaveApprovals, canManageUsers } from "@/lib/permissions";
+import { canAccessLeaveRequests, canViewEMSAdminDashboard, canManageUsers, isHR } from "@/lib/permissions";
 
 export type SidebarNavItem = {
   href: string;
@@ -16,15 +16,19 @@ export type SidebarNavItem = {
   icon: React.ComponentType<{ className?: string }>;
 };
 
-export function getSidebarItems(user: SessionUser): SidebarNavItem[] {
+export function getSidebarItems(user: SessionUser, canAccessLeaveApprovals: boolean): SidebarNavItem[] {
   const items: SidebarNavItem[] = [{ href: "/dashboard", label: "Dashboard", icon: LayoutDashboard }];
 
   if (canAccessLeaveRequests(user)) {
     items.push({ href: "/leave-requests", label: "Leave Requests", icon: CalendarDays });
   }
 
-  if (canViewLeaveApprovals(user)) {
+  if (canAccessLeaveApprovals) {
     items.push({ href: "/leave-approvals", label: "Leave Approvals", icon: CheckCheck });
+  }
+
+  if (isHR(user)) {
+    items.push({ href: "/leave-admin", label: "Leave Administration", icon: CalendarDays });
   }
 
   if (canManageUsers(user) || canViewEMSAdminDashboard(user)) {
@@ -39,8 +43,8 @@ export function getSidebarItems(user: SessionUser): SidebarNavItem[] {
   return items;
 }
 
-export function Sidebar({ user }: { user: SessionUser }) {
-  const items = getSidebarItems(user);
+export function Sidebar({ user, canAccessLeaveApprovals }: { user: SessionUser; canAccessLeaveApprovals: boolean }) {
+  const items = getSidebarItems(user, canAccessLeaveApprovals);
 
   return (
     <aside className="hidden lg:block shrink-0 w-64 2xl:w-72 border-r border-slate-200 bg-slate-950 text-slate-100">

@@ -77,5 +77,5 @@ export function canAssignApprovers(user: UserLike) {
 }
 
 export function canViewLeaveApprovals(user: UserLike) {
-  return isAdmin(user) || isManager(user) || isTeamLead(user) || isHR(user);
+  return isAdmin(user) || isHR(user);
 }

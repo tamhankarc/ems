@@ -59,10 +59,10 @@ function DayCell({ dateKey, day, todayKey, presentDays, leaveDays }: {
   if (dateKey) {
     if (dateKey === todayKey) {
       className = "border-sky-200 bg-sky-100";
+    } else if (leaveDays.has(dateKey)) {
+      className = "border-violet-200 bg-violet-100";
     } else if (dateKey > todayKey) {
       className = "border-slate-200 bg-white";
-    } else if (leaveDays.has(dateKey)) {
-      className = "border-pink-200 bg-pink-100";
     } else if (presentDays.has(dateKey)) {
       className = "border-emerald-200 bg-emerald-100";
     } else {
@@ -154,7 +154,7 @@ export function AttendanceCalendar({
         <div>
           <h2 className="section-title">Attendance calendar</h2>
           <p className="section-subtitle">
-            Green: present, Red: absent, Pink: approved leave, Blue: today, White: future.
+            Green: present, Red: absent, Violet: approved leave, Blue: today, White: future.
           </p>
         </div>
 

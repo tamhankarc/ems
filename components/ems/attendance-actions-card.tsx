@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { markAttendanceAction } from "@/lib/actions/attendance-actions";
 
 type Props = {
@@ -9,14 +9,41 @@ type Props = {
   markInAt?: string | null;
   markOutAt?: string | null;
   city?: string | null;
+  shift: "DAY" | "NIGHT";
 };
 
-export function AttendanceActionsCard({ canMarkIn, canMarkOut, markInAt, markOutAt, city }: Props) {
+function isDesktopLikeDevice() {
+  if (typeof window === "undefined") return true;
+  const ua = navigator.userAgent || "";
+  const mobileOrTablet = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  const smallTouch = window.innerWidth < 1024 && navigator.maxTouchPoints > 0;
+  return !(mobileOrTablet || smallTouch);
+}
+
+export function AttendanceActionsCard({ canMarkIn, canMarkOut, markInAt, markOutAt, city, shift }: Props) {
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
+  const [isDesktop, setIsDesktop] = useState(true);
+
+  useEffect(() => {
+    const evaluate = () => setIsDesktop(isDesktopLikeDevice());
+    evaluate();
+    window.addEventListener("resize", evaluate);
+    return () => window.removeEventListener("resize", evaluate);
+  }, []);
+
+  const subtitle = useMemo(() => {
+    return shift === "NIGHT"
+      ? "Night Shift · Mark-In: 9:00 PM to 3:00 AM IST. Mark-Out: 1:00 AM to 8:59 PM IST."
+      : "Day Shift · Mark-In: 8:30 AM to 3:00 PM IST. Mark-Out: 12:00 PM IST to 8:29 AM IST next day.";
+  }, [shift]);
 
   function submit(actionType: "MARK_IN" | "MARK_OUT") {
     setError("");
+    if (!isDesktopLikeDevice()) {
+      setError("Attendance is available only on desktop, laptop, or MacBook browsers.");
+      return;
+    }
     if (!("geolocation" in navigator)) {
       setError("Browser geolocation is required.");
       return;
@@ -47,14 +74,26 @@ export function AttendanceActionsCard({ canMarkIn, canMarkOut, markInAt, markOut
     );
   }
 
+  if (!isDesktop) {
+    return (
+      <section className="card p-6">
+        <div>
+          <h2 className="section-title">Attendance</h2>
+          <p className="section-subtitle">{subtitle}</p>
+        </div>
+        <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-800">
+          Attendance actions are available only on desktop, laptop, or MacBook browsers.
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="card p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="section-title">Attendance</h2>
-          <p className="section-subtitle">
-            Mark-In: 8:30 AM to 3:00 PM IST. Mark-Out: 12:00 PM IST to 8:29 AM IST next day.
-          </p>
+          <p className="section-subtitle">{subtitle}</p>
         </div>
         <div className="flex flex-wrap gap-3">
           <button

@@ -3,11 +3,9 @@ import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 
 const PUBLIC_PATHS = ["/login", "/unsupported-device"];
-const DESKTOP_ONLY_EXEMPT_PATHS = ["/unsupported-device"];
 const EMPLOYEE_ALLOWED_PATHS = [
   "/dashboard",
   "/leave-requests",
-  "/leave-approvals",
   "/profile",
   "/change-password",
 ];
@@ -28,7 +26,9 @@ const MANAGER_ALLOWED_PATHS = [
 ];
 const HR_ALLOWED_PATHS = [
   "/dashboard",
+  "/leave-requests",
   "/leave-approvals",
+  "/leave-admin",
   "/users",
   "/profile",
   "/change-password",
@@ -40,11 +40,6 @@ const ADMIN_ALLOWED_PATHS = [
   "/profile",
   "/change-password",
 ];
-
-function isDesktopRequest(request: NextRequest) {
-  const userAgent = request.headers.get("user-agent") ?? "";
-  return !/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
-}
 
 async function getSessionPayload(request: NextRequest) {
   const token = request.cookies.get("ems_session")?.value;
@@ -72,10 +67,6 @@ export async function middleware(request: NextRequest) {
     pathname.includes(".")
   ) {
     return NextResponse.next();
-  }
-
-  if (!isDesktopRequest(request) && !DESKTOP_ONLY_EXEMPT_PATHS.some((path) => pathname.startsWith(path))) {
-    return NextResponse.redirect(new URL("/unsupported-device", request.url));
   }
 
   const isPublic = PUBLIC_PATHS.some((path) => pathname.startsWith(path));
@@ -108,7 +99,19 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
-  if (session?.userType === "ADMIN" && !isAllowed(pathname, ADMIN_ALLOWED_PATHS)) {
+  if (
+    session?.userType === "ADMIN" &&
+    !(session?.functionalRole === "PROJECT_MANAGER" || session?.functionalRole === "OTHER") &&
+    !isAllowed(pathname, ADMIN_ALLOWED_PATHS)
+  ) {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
+
+  if (
+    session?.userType === "ADMIN" &&
+    (session?.functionalRole === "PROJECT_MANAGER" || session?.functionalRole === "OTHER") &&
+    !isAllowed(pathname, MANAGER_ALLOWED_PATHS)
+  ) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 

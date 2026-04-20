@@ -5,7 +5,8 @@ import { db } from "@/lib/db";
 import { clearSession, requireUserForAction } from "@/lib/auth";
 import { canMarkAttendance } from "@/lib/permissions";
 import { reverseGeocodeCity } from "@/lib/geo";
-import { getAttendanceWorkDateKey, getDayBoundsUtcFromIstDateKey, isMarkInWindow, isMarkOutWindow } from "@/lib/ist";
+import { getAttendanceWorkDateKey, getDayBoundsUtcFromIstDateKey, getMarkInWindowLabel, getMarkOutWindowLabel, isMarkInWindow, isMarkOutWindow } from "@/lib/ist";
+import { getLeaveBalanceForUser } from "@/lib/ems-queries";
 
 function toNumber(value: FormDataEntryValue | null) {
   if (typeof value !== "string" || !value.trim()) return null;
@@ -23,13 +24,16 @@ export async function markAttendanceAction(formData: FormData) {
   const actionType = String(formData.get("actionType") || "");
   const latitude = toNumber(formData.get("latitude"));
   const longitude = toNumber(formData.get("longitude"));
+  const currentYear = Number(new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric" }).format(new Date()));
+  const leaveBalance = await getLeaveBalanceForUser(user.id, currentYear);
+  const shift = leaveBalance.shift;
 
   if (!latitude || !longitude) {
     await clearSession();
     throw new Error("Browser geolocation is required. You have been signed out. Please enable geolocation and sign in again.");
   }
 
-  const workDateKey = getAttendanceWorkDateKey();
+  const workDateKey = getAttendanceWorkDateKey(new Date(), shift);
   const { startUtc, endUtc } = getDayBoundsUtcFromIstDateKey(workDateKey);
   const existing = await db.attendanceLog.findMany({
     where: {
@@ -40,10 +44,10 @@ export async function markAttendanceAction(formData: FormData) {
   });
 
   if (actionType === "MARK_IN") {
-    if (!isMarkInWindow()) throw new Error("Mark-In is allowed only between 8:30 AM and 3:00 PM IST.");
+    if (!isMarkInWindow(new Date(), shift)) throw new Error(`${getMarkInWindowLabel(shift)} Mark-In is not allowed right now.`);
     if (existing.some((row) => row.type === "MARK_IN")) throw new Error("Mark-In is already recorded for this attendance day.");
   } else if (actionType === "MARK_OUT") {
-    if (!isMarkOutWindow()) throw new Error("Mark-Out is allowed only between 12:00 PM IST and 8:29 AM IST next day.");
+    if (!isMarkOutWindow(new Date(), shift)) throw new Error(`${getMarkOutWindowLabel(shift)} Mark-Out is not allowed right now.`);
     if (!existing.some((row) => row.type === "MARK_IN")) throw new Error("Mark-In must be recorded before Mark-Out.");
     if (existing.some((row) => row.type === "MARK_OUT")) throw new Error("Mark-Out is already recorded for this attendance day.");
   } else {
