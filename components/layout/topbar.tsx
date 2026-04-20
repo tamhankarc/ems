@@ -19,13 +19,16 @@ export function Topbar({
             <h1 className="text-lg font-semibold text-slate-900">Attendance &amp; Leave Management</h1>
           </div>
         </div>
+
         <div className="text-right">
           <p className="text-sm font-medium text-slate-900">{user.fullName}</p>
           <p className="text-xs tracking-wide text-slate-500">
-            {user.userType.replaceAll("_", " ")}{user.designation ? ` · ${user.designation}` : ""}
+            {user.userType.replaceAll("_", " ")}
+            {user.designation ? ` · ${user.designation}` : ""}
           </p>
-          <form action={logoutAction} className="pt-2">
-            <button className="btn-secondary w-full border-slate-700 bg-slate-900 text-slate-100 hover:bg-slate-800 hover:text-white">
+
+          <form action={logoutAction} className="pt-2 flex justify-end">
+            <button className="btn-secondary w-full max-w-[224px] border-slate-700 bg-slate-900 text-slate-100 hover:bg-slate-800 hover:text-white sm:w-auto sm:min-w-[160px]">
               Sign out
             </button>
           </form>

@@ -8,6 +8,7 @@ type CalendarData = {
   monthKey: string;
   presentDays: string[];
   leaveDays: string[];
+  weekendOrHolidayDays: string[];
   minMonthKey: string;
   maxMonthKey: string;
 };
@@ -47,12 +48,13 @@ function buildMonthGrid(monthKey: string) {
   return cells;
 }
 
-function DayCell({ dateKey, day, todayKey, presentDays, leaveDays }: {
+function DayCell({ dateKey, day, todayKey, presentDays, leaveDays, weekendOrHolidayDays }: {
   dateKey?: string;
   day: number | null;
   todayKey: string;
   presentDays: Set<string>;
   leaveDays: Set<string>;
+  weekendOrHolidayDays: Set<string>;
 }) {
   let className = "bg-transparent border-transparent";
 
@@ -61,6 +63,8 @@ function DayCell({ dateKey, day, todayKey, presentDays, leaveDays }: {
       className = "border-sky-200 bg-sky-100";
     } else if (leaveDays.has(dateKey)) {
       className = "border-violet-200 bg-violet-100";
+    } else if (weekendOrHolidayDays.has(dateKey)) {
+      className = "border-purple-200 bg-purple-100";
     } else if (dateKey > todayKey) {
       className = "border-slate-200 bg-white";
     } else if (presentDays.has(dateKey)) {
@@ -79,11 +83,12 @@ function DayCell({ dateKey, day, todayKey, presentDays, leaveDays }: {
   );
 }
 
-function MonthBlock({ monthKey, todayKey, presentDays, leaveDays, className = "" }: {
+function MonthBlock({ monthKey, todayKey, presentDays, leaveDays, weekendOrHolidayDays, className = "" }: {
   monthKey: string;
   todayKey: string;
   presentDays: Set<string>;
   leaveDays: Set<string>;
+  weekendOrHolidayDays: Set<string>;
   className?: string;
 }) {
   const grid = buildMonthGrid(monthKey);
@@ -109,6 +114,7 @@ function MonthBlock({ monthKey, todayKey, presentDays, leaveDays, className = ""
             todayKey={todayKey}
             presentDays={presentDays}
             leaveDays={leaveDays}
+            weekendOrHolidayDays={weekendOrHolidayDays}
           />
         ))}
       </div>
@@ -142,8 +148,10 @@ export function AttendanceCalendar({
 
   const focusPresentDays = new Set(focusData.presentDays);
   const focusLeaveDays = new Set(focusData.leaveDays);
+  const focusWeekendOrHolidayDays = new Set(focusData.weekendOrHolidayDays);
   const companionPresentDays = new Set(companionData?.presentDays ?? []);
   const companionLeaveDays = new Set(companionData?.leaveDays ?? []);
+  const companionWeekendOrHolidayDays = new Set(companionData?.weekendOrHolidayDays ?? []);
 
   const showDualLayout = Boolean(companionMonthKey && companionData);
   const leftMonthKey = companionMonthKey && companionData ? companionMonthKey : focusMonthKey;
@@ -154,7 +162,7 @@ export function AttendanceCalendar({
         <div>
           <h2 className="section-title">Attendance calendar</h2>
           <p className="section-subtitle">
-            Green: present, Red: absent, Violet: approved leave, Blue: today, White: future.
+            Green: present, Red: absent, Violet: approved leave, Purple: weekend or official holiday, Blue: today, White: future. Weekend or holiday dates change to approved leave only for unpaid sandwich leave cases.
           </p>
         </div>
 
@@ -186,6 +194,7 @@ export function AttendanceCalendar({
             todayKey={todayKey}
             presentDays={companionPresentDays}
             leaveDays={companionLeaveDays}
+            weekendOrHolidayDays={companionWeekendOrHolidayDays}
             className="hidden 2xl:block"
           />
           <MonthBlock
@@ -193,6 +202,7 @@ export function AttendanceCalendar({
             todayKey={todayKey}
             presentDays={focusPresentDays}
             leaveDays={focusLeaveDays}
+            weekendOrHolidayDays={focusWeekendOrHolidayDays}
             className="2xl:col-span-1"
           />
         </div>
@@ -203,6 +213,7 @@ export function AttendanceCalendar({
             todayKey={todayKey}
             presentDays={focusPresentDays}
             leaveDays={focusLeaveDays}
+            weekendOrHolidayDays={focusWeekendOrHolidayDays}
           />
         </div>
       )}

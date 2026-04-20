@@ -259,6 +259,7 @@ export async function getAttendanceCalendarData(userId: string, monthKey: string
       select: {
         startDate: true,
         endDate: true,
+        unpaidDaysUsed: true,
       },
     }),
   ]);
@@ -275,13 +276,31 @@ export async function getAttendanceCalendarData(userId: string, monthKey: string
   });
 
   const holidayKeys = new Set(holidayRows.map((row) => getIstDateKey(row.holidayDate)));
+  const weekendOrHolidayDays = new Set<string>(holidayKeys);
+  const [year, month] = monthKey.split("-").map(Number);
+  const daysInMonth = new Date(Date.UTC(year, month, 0, 12, 0, 0)).getUTCDate();
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const dateKey = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    if (isWeekendDateKey(dateKey)) {
+      weekendOrHolidayDays.add(dateKey);
+    }
+  }
+
   const leaveDays = new Set<string>();
   for (const row of leaveRows) {
+    const shouldCountSandwichDaysAsLeave = Number(row.unpaidDaysUsed ?? 0) > 0;
     let cursorKey = getIstDateKey(row.startDate);
     const endKey = getIstDateKey(row.endDate);
     while (cursorKey <= endKey) {
-      if (cursorKey.startsWith(monthKey) && !isWeekendDateKey(cursorKey) && !holidayKeys.has(cursorKey)) {
-        leaveDays.add(cursorKey);
+      const isWeekendOrHoliday = isWeekendDateKey(cursorKey) || holidayKeys.has(cursorKey);
+      if (cursorKey.startsWith(monthKey)) {
+        if (isWeekendOrHoliday) {
+          if (shouldCountSandwichDaysAsLeave) {
+            leaveDays.add(cursorKey);
+          }
+        } else {
+          leaveDays.add(cursorKey);
+        }
       }
       const nextStart = getDayBoundsUtcFromIstDateKey(cursorKey).endUtc;
       cursorKey = getIstDateKey(nextStart);
@@ -292,6 +311,7 @@ export async function getAttendanceCalendarData(userId: string, monthKey: string
     monthKey,
     presentDays: [...presentDays],
     leaveDays: [...leaveDays],
+    weekendOrHolidayDays: [...weekendOrHolidayDays],
     minMonthKey: getInitialCalendarStartMonth(joiningDate),
     maxMonthKey: getIstDateKey().slice(0, 7),
   };
